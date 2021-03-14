@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "masound.h"
 
@@ -62,6 +63,8 @@ T_pf_MaSound_Delete		pf_MaSound_Delete;
 T_pf_Phrase_Terminate	pf_Phrase_Terminate;
 T_pf_MaSound_End		pf_MaSound_End;
 
+static void dbg_DumpBuffer(char* title, const void* ptr, int size);
+
 const char ORIGINAL_MA3_DLL[] = "original-ma3smwemu.dll";
 
 HMODULE h_originalMa3Dll = NULL;
@@ -69,17 +72,21 @@ HMODULE h_originalMa3Dll = NULL;
 #define DBG_SIZE 128
 char dbgBuf[DBG_SIZE + 1];
 
+static DWORD timeStamp = 0;
+
 //------------------------------------------------------------------------------------------------------------
 
-void putToFile(char* dbgString)
+void putToTextFile(char* dbgString)
 {
 	HANDLE hFile;
 	DWORD dwBytesToWrite = (DWORD)strlen(dbgString);
 	DWORD dwBytesWritten = 0;
 	BOOL bErrorFlag = FALSE;
 
+	char fileName[64];
+	sprintf(fileName, "d:\\MaDBG_%d.txt", timeStamp);
 
-	hFile = CreateFile("dbg.txt", // name of the write
+	hFile = CreateFile(fileName, // name of the write
 		GENERIC_WRITE,          // open for writing
 		0,                      // do not share
 		NULL,                   // default security
@@ -105,6 +112,44 @@ void putToFile(char* dbgString)
 	CloseHandle(hFile);
 }
 
+
+void putToBinaryFile(char * prefix, BYTE* buffer, DWORD len)
+{
+	HANDLE hFile;
+	DWORD dwBytesWritten = 0;
+	BOOL bErrorFlag = FALSE;
+
+	time_t timer;
+	time(&timer);
+	DWORD localTimeStamp = (DWORD)timer;
+
+	char fileName[32];
+	sprintf(fileName, "d:\\%s_%d.bin", prefix, localTimeStamp);
+
+	hFile = CreateFile(fileName, // name of the write
+		GENERIC_WRITE,          // open for writing
+		0,                      // do not share
+		NULL,                   // default security
+		OPEN_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL,  // normal file
+		NULL);                  // no attr. template
+
+	if (hFile == INVALID_HANDLE_VALUE)
+	{
+		return;
+	}
+
+	bErrorFlag = WriteFile(
+		hFile,           // open file handle
+		buffer,      // start of data to write
+		len,  // number of bytes to write
+		&dwBytesWritten, // number of bytes that were written
+		NULL);            // no overlapped structure
+
+	CloseHandle(hFile);
+}
+
+
 //------------------------------------------------------------------------------------------------------------
 
 BOOL APIENTRY DllMain(HMODULE hModule,
@@ -124,6 +169,10 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 		}
 		else
 		{
+			time_t timer;
+			time(&timer);
+			timeStamp = (DWORD) timer;
+
 			pf_MaSound_Initialize = (T_pf_MaSound_Initialize)GetProcAddress(h_originalMa3Dll, "MaSound_Initialize");
 			pf_MaSound_Create = (T_pf_MaSound_Create)GetProcAddress(h_originalMa3Dll, "MaSound_Create");
 			pf_MaSound_Load = (T_pf_MaSound_Load)GetProcAddress(h_originalMa3Dll, "MaSound_Load");
@@ -171,7 +220,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 MA3SMWEMU_API int Phrase_Initialize(void)
 {
 	sprintf_s(dbgBuf, DBG_SIZE, "Phrase_Initialize\n");
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return MASMW_SUCCESS;
 }
 
@@ -179,7 +228,7 @@ MA3SMWEMU_API int Phrase_Terminate(void)
 {
 	int ret = pf_Phrase_Terminate();
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) Phrase_Terminate\n", ret);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -308,7 +357,7 @@ MA3SMWEMU_API signed long MaSound_Initialize(void)
 {
 	signed long ret = pf_MaSound_Initialize();
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Initialize\n", ret);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -323,7 +372,7 @@ MA3SMWEMU_API signed long MaSound_Create(unsigned char srm_id)
 {
 	signed long ret = pf_MaSound_Create(srm_id);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Create: cnv_id=%d\n", ret, srm_id);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -332,8 +381,11 @@ MA3SMWEMU_API signed long MaSound_Load(signed long func_id, unsigned char* file_
 {
 	signed long ret = pf_MaSound_Load(func_id, file_ptr, file_size, mode, func, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Load: id=%ld\n", ret, func_id);
-	putToFile(dbgBuf);
-	//dbg_DumpBuffer(file_ptr, file_size);
+	putToTextFile(dbgBuf);
+	dbg_DumpBuffer(NULL, file_ptr, file_size);
+
+	putToBinaryFile("MaSoundLoad", file_ptr, file_size);
+
 	return ret;
 }
 
@@ -342,7 +394,7 @@ MA3SMWEMU_API signed long MaSound_Open(signed long func_id, signed long file_id,
 {
 	signed long ret = pf_MaSound_Open(func_id, file_id, open_mode, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Open: id=%ld hd=%ld md=%hd\n", ret, func_id, file_id, open_mode);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -351,7 +403,7 @@ MA3SMWEMU_API signed long MaSound_Control(signed long func_id, signed long file_
 {
 	signed long ret = pf_MaSound_Control(func_id, file_id, ctrl_num, prm,ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Control: id=%ld hd=%ld cn=%d\n", ret, func_id, file_id, ctrl_num);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -360,7 +412,7 @@ MA3SMWEMU_API signed long MaSound_Standby(signed long func_id, signed long file_
 {
 	signed long ret = pf_MaSound_Standby(func_id, file_id, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Standby: id=%ld hd=%ld\n", ret, func_id, file_id);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -376,7 +428,7 @@ MA3SMWEMU_API signed long MaSound_Start(signed long func_id, signed long file_id
 {
 	signed long ret = pf_MaSound_Start(func_id, file_id, play_mode, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Start: id=%ld hd=%ld pm=%d\n", ret, func_id, file_id, play_mode);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -399,7 +451,7 @@ MA3SMWEMU_API signed long MaSound_Stop(signed long func_id, signed long file_id,
 {
 	signed long ret = pf_MaSound_Stop(func_id, file_id, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Stop: id=%ld hd=%ld\n", ret, func_id, file_id);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -408,7 +460,7 @@ MA3SMWEMU_API signed long MaSound_Close(signed long func_id, signed long file_id
 {
 	signed long ret = pf_MaSound_Close(func_id, file_id, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Close: id=%ld hd=%ld\n", ret, func_id, file_id);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -417,7 +469,7 @@ MA3SMWEMU_API signed long MaSound_Unload(signed long func_id, signed long file_i
 {
 	signed long ret = pf_MaSound_Unload(func_id, file_id, ext_args);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Unload: id=%ld hd=%ld\n", ret, func_id, file_id);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -426,7 +478,7 @@ MA3SMWEMU_API signed long MaSound_Delete(signed long func_id)
 {
 	signed long ret = pf_MaSound_Delete(func_id);
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_Delete: id=%ld\n", ret, func_id);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
@@ -434,9 +486,85 @@ MA3SMWEMU_API signed long MaSound_End(void)
 {
 	signed long ret = pf_MaSound_End();
 	sprintf_s(dbgBuf, DBG_SIZE, "(%d) MaSound_End\n", ret);
-	putToFile(dbgBuf);
+	putToTextFile(dbgBuf);
 	return ret;
 }
 
 
+//------------------------------------------------------------------------------------------------------------
+
+static const char hexTable[] = "0123456789ABCDEF";
+
+static char dmpTextBuf[128];
+
+static void dbg_DumpBuffer(char* title, const void* ptr, int size)
+{
+#define _PER_LINE 16
+#define _PER_LINE_STR (_PER_LINE + 1)
+#define _PER_LINE_HEX ((_PER_LINE * 3) + 1)
+
+
+	if (title != NULL) {
+		sprintf(dmpTextBuf, "%s\n", title);
+		putToTextFile(dmpTextBuf);
+	}
+
+	char str[_PER_LINE_STR], hex[_PER_LINE_HEX];
+
+	unsigned char currentChar;
+
+	int i = 0, j = 0;
+	const unsigned char* buf = (const unsigned char*)ptr;
+
+	for (i = j = 0; size-- > 0; ++buf)
+	{
+		currentChar = *buf;
+		sprintf(hex + (i * 3), "%02.2X ", currentChar);
+#if 0
+		hex[i * 3] = hexTable[(currentChar >> 4) & 0x0F];
+		hex[i * 3 + 1] = hexTable[currentChar & 0x0F];
+		hex[i * 3 + 2] = ' ';
+#endif
+
+		if ((currentChar != '%') && isprint(currentChar))
+			str[i] = currentChar;
+		else
+			str[i] = '.';
+
+		i++;
+
+		if (i >= _PER_LINE)
+		{
+			str[i] = 0x00;
+			hex[i * 3] = 0x00;
+			sprintf(dmpTextBuf, "%4d: %s %s\n", j, hex, str);
+			putToTextFile(dmpTextBuf);
+
+			j += _PER_LINE;
+			i = 0;
+		}
+	}
+
+	if (i)
+	{
+		str[i] = 0x00;
+		while (i < _PER_LINE)
+		{
+			sprintf(hex + (i * 3), "   ");
+#if 0
+			hex[i * 3] = ' ';
+			hex[i * 3 + 1] = ' ';
+			hex[i * 3 + 2] = ' ';
+#endif
+
+			i++;
+		}
+		hex[i * 3] = 0x00;
+
+		sprintf(dmpTextBuf, "%4d: %s %s\n", j, hex, str);
+		putToTextFile(dmpTextBuf);
+
+	}
+
+}
 
